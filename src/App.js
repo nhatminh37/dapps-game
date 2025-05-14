@@ -28,7 +28,7 @@ function App() {
   const [message, setMessage] = useState({ type: '', content: '' });
 
   // Contract address - updated with the deployed contract address
-  const contractAddress = '0xd7ac7ef3273a99d2e1fb7a5c4fe0ce25f54d675b';
+  const contractAddress = '0xeebd7cd6898d813180bee3d1910c5cee863bc7dd';
 
   // Initialize the app
   useEffect(() => {
@@ -158,13 +158,15 @@ function App() {
       try {
         const updatedStats = [...machineStats];
         
+        const currentMachine = await gameContract.getCurrentMachine(address);
+        const currentMachineIndex = currentMachine.toNumber() - 1; // Convert back to 0-based index
+        
         for (let i = 0; i < 3; i++) {
           const playerCount = await gameContract.getMachinePlayerCount(i);
-          const hasPlayed = await gameContract.hasPlayed(i, address);
           
           updatedStats[i] = {
             playerCount: playerCount.toNumber(),
-            hasPlayed: hasPlayed
+            hasPlayed: currentMachine.toNumber() > 0 && i !== currentMachineIndex // Player is playing on a different machine
           };
         }
         
@@ -273,19 +275,19 @@ function App() {
       setLoading(true);
       setMessage({ type: '', content: '' });
       
-      // Check if player has already played on this machine
-      const hasPlayed = await contract.hasPlayed(selectedMachine, account);
-      if (hasPlayed) {
+      // Check if player is already playing on a different machine
+      const currentMachine = await contract.getCurrentMachine(account);
+      if (currentMachine.toNumber() > 0 && currentMachine.toNumber() - 1 !== selectedMachine) {
         setMessage({
           type: 'warning',
-          content: 'You have already played on this machine!'
+          content: 'You are already playing on Machine ' + currentMachine.toNumber() + '!'
         });
         setLoading(false);
         return;
       }
       
       // First approve the transfer
-      const amountToBet = ethers.utils.parseUnits(betAmount, 18);
+      const amountToBet = ethers.BigNumber.from(betAmount);
       const approveTx = await tokenContract.approve(contract.address, amountToBet);
       
       setMessage({
@@ -454,7 +456,7 @@ function App() {
                                 Players: {machineStats[machine].playerCount}/10
                                 <br/>
                                 {machineStats[machine].hasPlayed ? 
-                                  <span className="text-danger">You've already played</span> : 
+                                  <span className="text-danger">Not available - playing on another machine</span> : 
                                   <span className="text-success">Available to play</span>
                                 }
                               </Card.Text>
@@ -488,7 +490,7 @@ function App() {
                         parseFloat(betAmount) < 0 || 
                         parseFloat(betAmount) > 10000 ||
                         selectedMachine === null ||
-                        (machineStats[selectedMachine] && machineStats[selectedMachine].hasPlayed)
+                        machineStats[selectedMachine]?.hasPlayed
                       }
                     >
                       {loading ? <Spinner animation="border" size="sm" /> : 'Place Bet'}
@@ -510,7 +512,7 @@ function App() {
                       <li>Players place bets (0-10,000 DGT) on a machine.</li>
                       <li>The player whose bet makes the machine reach or exceed the target wins the prize.</li>
                       <li>The prize equals the target amount.</li>
-                      <li>Each player can only play once per machine before it resets.</li>
+                      <li>Players can play multiple times on the same machine but cannot play on multiple machines simultaneously.</li>
                       <li>Each machine can have a maximum of 10 players.</li>
                       <li>Machines reset once a winner is determined.</li>
                     </ol>
