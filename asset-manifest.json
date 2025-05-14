@@ -1,15 +1,15 @@
 {
   "files": {
     "main.css": "/dapps-game/static/css/main.bff7b457.css",
-    "main.js": "/dapps-game/static/js/main.b75c00fc.js",
+    "main.js": "/dapps-game/static/js/main.6ef2e39d.js",
     "static/js/453.7b858b0c.chunk.js": "/dapps-game/static/js/453.7b858b0c.chunk.js",
     "index.html": "/dapps-game/index.html",
     "main.bff7b457.css.map": "/dapps-game/static/css/main.bff7b457.css.map",
-    "main.b75c00fc.js.map": "/dapps-game/static/js/main.b75c00fc.js.map",
+    "main.6ef2e39d.js.map": "/dapps-game/static/js/main.6ef2e39d.js.map",
     "453.7b858b0c.chunk.js.map": "/dapps-game/static/js/453.7b858b0c.chunk.js.map"
   },
   "entrypoints": [
     "static/css/main.bff7b457.css",
-    "static/js/main.b75c00fc.js"
+    "static/js/main.6ef2e39d.js"
   ]
 }
