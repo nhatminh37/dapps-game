@@ -15,7 +15,7 @@ A decentralized application game built on Ethereum where players can try their l
 
 ## Contract Details
 
-- GameMachine Contract: `0xd7ac7ef3273a99d2e1fb7a5c4fe0ce25f54d675b`
+- GameMachine Contract: `0x5acd86cdbf49cb5551a4790fdbce14d1ec78c16d`
 - Network: Sepolia Testnet
 
 ## Deployment Steps
