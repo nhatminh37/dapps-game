@@ -17,32 +17,7 @@ A decentralized application game built on Ethereum where players can try their l
 
 - GameMachine Contract: `0x5acd86cdbf49cb5551a4790fdbce14d1ec78c16d`
 - Network: Sepolia Testnet
-
-## Deployment Steps
-
-1. Create a GitHub repository named "dapps-game"
-
-2. Initialize and push the code:
-   ```
-   cd dapps-game-github-deploy
-   git init
-   git add .
-   git commit -m "Initial commit"
-   git branch -M main
-   git remote add origin https://github.com/nhatminh37/dapps-game.git
-   git push -u origin main
-   ```
-
-3. Install dependencies and deploy:
-   ```
-   npm install
-   npm run deploy
-   ```
-
-4. Go to your GitHub repository settings:
-   - Find the "Pages" section
-   - Ensure source is set to "gh-pages" branch
-   - Your app will be available at https://nhatminh37.github.io/dapps-game
+- App will be available at https://nhatminh37.github.io/dapps-game/
 
 ## Technology Used
 
