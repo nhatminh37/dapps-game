@@ -1,270 +1,253 @@
-Generated Test Cases:
 
 
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.13;
+pragma solidity ^0.8.9;
 
-// Dummy library to satisfy missing deliveryTime member in DeFiPaymentGateway.Order struct
-library DeFiPaymentGateway {
-    struct Order {
-        uint256 deliveryTime;
-    }
-}
-
-// Import Foundry's testing utilities and console for logging
+// Import the Foundry testing library and console
 import {Test, console} from "forge-std/Test.sol";
 
-// Import the tested contract. 
-import {GameMachine, GameToken} from "../src/GameMachine_21007491_1747217530.sol";
+// Import the tested contract from the specified path
+import {GameMachine, GameToken} from "../contracts/GameMachine.sol";
 
-contract ContractTest is Test {
+contract GameMachineTest is Test {
     GameMachine public gameMachine;
     GameToken public gameToken;
-
-    // Define two user addresses for testing various scenarios
-    address public user = address(0xBEEF);
-    address public user2 = address(0xABCD);
-
-    // setUp is called before each test case.
+    
+    // Some constants from the contract for ease of use
+    uint256 constant ETH_TO_TOKEN_RATE = 100000; // as defined in the tested contract
+    uint256 constant MAX_BET = 10000 * 10**18;
+    uint256 constant MIN_BET = 0 * 10**18; // as defined in the tested contract
+    uint256 constant MAX_PLAYERS = 10;
+    
+    // Set up before each test
     function setUp() public {
-        // Deploy the main game contract. Since the deployer becomes owner,
-        // this contract (i.e. msg.sender in setUp) is the owner.
+        // Deploy GameMachine; the deployer (this contract) becomes the owner.
         gameMachine = new GameMachine();
-        // Retrieve the GameToken instance created in the GameMachine constructor.
+        // Retrieve the associated GameToken contract.
         gameToken = gameMachine.gameToken();
-
-        // Fund test user accounts with ETH to simulate real users
-        vm.deal(user, 10 ether);
-        vm.deal(user2, 10 ether);
-
-        // Fund the GameMachine contract with ETH so it can pay out token sales.
+        
+        // Fund the GameMachine contract with ETH so it can pay out in sellTokens and withdraw.
         vm.deal(address(gameMachine), 10 ether);
-        console.log("GameMachine initial ETH balance: %d ether", address(gameMachine).balance / 1 ether);
+        
+        console.log("GameMachine deployed and funded with %s ETH", address(gameMachine).balance);
     }
-
-    // Test Case 1: Buying tokens with ETH should mint tokens accordingly.
+    
+    // Test case: Buying tokens with ETH results in correct token minting.
     function test_buyTokens() public {
         console.log("Running test_buyTokens");
-        // Have 'user' buy tokens by sending 1 ETH.
-        vm.prank(user);
-        uint256 ethVal = 1 ether;
-        gameMachine.buyTokens{value: ethVal}();
-
-        // Expected token amount = sent ETH * ETH_TO_TOKEN_RATE.
-        uint256 expectedTokens = ethVal * gameMachine.ETH_TO_TOKEN_RATE();
-        uint256 userTokenBalance = gameToken.balanceOf(user);
-        console.log("User token balance: %s", vm.toString(userTokenBalance));
-        assertEq(userTokenBalance, expectedTokens, "User token balance should match the token purchase amount");
+        
+        // Set amount to buy tokens with. 1 ether.
+        uint256 ethAmount = 1 ether;
+        // Call buyTokens sending 1 ether.
+        gameMachine.buyTokens{value: ethAmount}();
+        
+        // Calculate expected token amount: ethAmount * ETH_TO_TOKEN_RATE.
+        uint256 expectedTokenAmount = ethAmount * ETH_TO_TOKEN_RATE;
+        // Note: Tokens have 18 decimals like ETH.
+        uint256 balance = gameToken.balanceOf(address(this));
+        console.log("Token balance of buyer: %s", balance);
+        assertEq(balance, expectedTokenAmount, "Token balance does not match expected mint amount");
     }
-
-    // Test Case 2: Selling tokens back for ETH.
+    
+    // Test case: Selling tokens awards ETH back to the seller.
     function test_sellTokens() public {
         console.log("Running test_sellTokens");
-        // Step 1: 'user' buys tokens.
-        vm.prank(user);
-        uint256 ethVal = 2 ether;
-        gameMachine.buyTokens{value: ethVal}();
-        uint256 tokenAmount = ethVal * gameMachine.ETH_TO_TOKEN_RATE();
-
-        // Step 2: 'user' approves the GameMachine contract to spend their tokens.
-        vm.prank(user);
+        
+        // First: Buy tokens to have a balance.
+        uint256 ethAmount = 1 ether;
+        gameMachine.buyTokens{value: ethAmount}();
+        uint256 tokenAmount = ethAmount * ETH_TO_TOKEN_RATE;
+        
+        // Approve GameMachine contract to spend tokens on behalf of seller.
         gameToken.approve(address(gameMachine), tokenAmount);
-
-        // Step 3: 'user' sells half of their tokens.
-        uint256 sellAmount = tokenAmount / 2;
-        vm.prank(user);
-        gameMachine.sellTokens(sellAmount);
-
-        // Expected ETH return equals sellAmount divided by ETH_TO_TOKEN_RATE.
-        uint256 expectedEth = sellAmount / gameMachine.ETH_TO_TOKEN_RATE();
-        // Check that the GameMachine ETH balance has decreased by expectedEth.
-        uint256 machineEthAfter = address(gameMachine).balance;
-        assertEq(machineEthAfter, 10 ether - expectedEth, "GameMachine ETH balance should reduce by the sold ETH amount");
+        
+        // Expected ETH amount to receive when selling all tokens.
+        uint256 expectedEth = tokenAmount / ETH_TO_TOKEN_RATE;
+        uint256 sellerEthBefore = address(this).balance;
+        
+        // Call sellTokens.
+        gameMachine.sellTokens(tokenAmount);
+        uint256 sellerEthAfter = address(this).balance;
+        
+        console.log("Seller ETH before: %s, after sellTokens: %s", sellerEthBefore, sellerEthAfter);
+        // Check that seller receives the expected ETH. Allowing some margin for gas.
+        assertEq(sellerEthAfter, sellerEthBefore + expectedEth, "Seller did not receive correct ETH amount for tokens sold");
     }
-
-    // Test Case 3: Normal bet placement (without triggering a win).
-    function test_placeBet_normal() public {
-        console.log("Running test_placeBet_normal");
-        // Setup: 'user' buys tokens.
-        vm.prank(user);
-        gameMachine.buyTokens{value: 1 ether}();
-
-        // Choose a bet amount within range (MIN_BET=0, MAX_BET=10000).
-        uint256 betAmount = 500;
-        // Approve the GameMachine contract to transfer tokens on behalf of 'user'.
-        vm.prank(user);
-        gameToken.approve(address(gameMachine), type(uint256).max);
-
-        // Record initial token balance.
-        uint256 initialTokenBalance = gameToken.balanceOf(user);
-
-        // User places a bet on machine with ID 0.
+    
+    // Test case: Placing bets correctly updates machine state and triggers win when aim is reached.
+    function test_placeBet_winCondition() public {
+        console.log("Running test_placeBet_winCondition");
+        
+        // Buy tokens with sufficient amount.
+        uint256 ethAmount = 10 ether;
+        gameMachine.buyTokens{value: ethAmount}();
+        uint256 buyerTokenBalance = gameToken.balanceOf(address(this));
+        console.log("Buyer token balance: %s", buyerTokenBalance);
+        
+        // Approve GameMachine to spend tokens.
+        uint256 approvalAmount = buyerTokenBalance;
+        gameToken.approve(address(gameMachine), approvalAmount);
+        
+        // We are playing on machine 0 (machineId = 0)
         uint256 machineId = 0;
-        vm.prank(user);
-        gameMachine.placeBet(machineId, betAmount);
-
-        // Verify the user's token balance decreased by betAmount.
-        uint256 finalTokenBalance = gameToken.balanceOf(user);
-        assertEq(finalTokenBalance, initialTokenBalance - betAmount, "User token balance should decrease by the bet amount");
-
-        // Verify that the user is assigned to machineId+1 (playerMachine mapping uses 1-indexing for assigned machines).
-        uint256 userMachine = gameMachine.getCurrentMachine(user);
-        assertEq(userMachine, machineId + 1, "User should be assigned to the correct machine");
-
-        // Verify the machine's player count has increased.
-        uint256 playerCount = gameMachine.getMachinePlayerCount(machineId);
-        assertEq(playerCount, 1, "Machine player count should be updated after placing a bet");
-
-        // Verify via hasPlayed function.
-        bool hasPlayed = gameMachine.hasPlayed(machineId, user);
-        assertTrue(hasPlayed, "User should be recorded as having played on the machine");
-    }
-
-    // Test Case 4: Placing bets that trigger a win.
-    // When the cumulative bets meet or exceed the machine's aim, the player wins.
-    function test_placeBet_win() public {
-        console.log("Running test_placeBet_win");
-        // 'user' buys enough tokens for multiple bets.
-        vm.prank(user);
-        gameMachine.buyTokens{value: 5 ether}();
-        uint256 machineId = 0;
-        // Obtain the current aim for machine 0 (only owner can do this; this contract is the owner).
+        
+        // Retrieve the current aim of machine 0 (only available for owner, and this contract is the owner).
         uint256 aim = gameMachine.getAim(machineId);
-        console.log("Machine aim: %s", vm.toString(aim));
-
-        // Approve a huge allowance for repeated bets.
-        vm.prank(user);
-        gameToken.approve(address(gameMachine), type(uint256).max);
-
+        console.log("Machine %s aim: %s", machineId, aim);
+        
+        // Bet in multiple rounds. Here we bet MAX_BET repeatedly.
+        // To win, cumulative bets >= aim. Use 10 bets of MAX_BET if needed.
         uint256 cumulativeBet = 0;
-        uint256 betAmount = gameMachine.MAX_BET(); // Each bet must not exceed MAX_BET.
-        // Loop: Place bets until adding one more bet meets or exceeds the aim.
-        while (cumulativeBet + betAmount < aim) {
-            vm.prank(user);
+        uint256 rounds = 0;
+        while(cumulativeBet < aim) {
+            // Use the maximum allowed bet but ensure we don’t exceed the aim.
+            uint256 betAmount = MAX_BET;
+            if(cumulativeBet + betAmount > aim) {
+                betAmount = aim - cumulativeBet;
+            }
+            // Place the bet.
             gameMachine.placeBet(machineId, betAmount);
             cumulativeBet += betAmount;
+            rounds++;
         }
-
-        uint256 finalBet = aim - cumulativeBet;
-        // In the rare event that finalBet is 0, we add one more bet to trigger the win.
-        if (finalBet == 0) {
-            finalBet = betAmount;
-        }
-        // Record token balance before the winning bet.
-        uint256 balanceBefore = gameToken.balanceOf(user);
-        vm.prank(user);
-        gameMachine.placeBet(machineId, finalBet);
-        // After win, prize tokens (equal to the aim) are minted.
-        uint256 balanceAfter = gameToken.balanceOf(user);
-        // Expected: balanceAfter = balanceBefore - finalBet (bet spent) + aim (prize)
-        assertEq(balanceAfter, balanceBefore - finalBet + aim, "User token balance should reflect the win prize");
-
-        // After a win, the machine is reset. Check that the machine's player count is 0.
-        uint256 playerCountAfter = gameMachine.getMachinePlayerCount(machineId);
-        assertEq(playerCountAfter, 0, "Machine player count should reset to 0 after a win");
-
-        // Also, the user's current machine assignment should be reset to 0.
-        uint256 userMachine = gameMachine.getCurrentMachine(user);
-        assertEq(userMachine, 0, "User machine assignment should reset after winning");
+        console.log("Placed %s bets totaling: %s", rounds, cumulativeBet);
+        
+        // At this point, winning should have been triggered and the machine should have reset.
+        // Check: currentTotal should be 0 and the player's current machine assignment should be reset.
+        uint256 machinePlayerCount = gameMachine.getMachinePlayerCount(machineId);
+        uint256 currentMachine = gameMachine.getCurrentMachine(address(this));
+        assertEq(machinePlayerCount, 0, "Machine player count should be reset to 0 after win");
+        assertEq(currentMachine, 0, "Player's machine assignment should be reset to 0 after winning");
+        
+        // Also, the winner should have received prize tokens equal to the machine aim.
+        uint256 postWinBalance = gameToken.balanceOf(address(this));
+        // Note: The player spent tokens equal to cumulative bets, but then got prize tokens minted.
+        // Therefore, postWinBalance should be (initial tokens - cumulativeBet + prize) where prize = aim.
+        uint256 expectedBalance = buyerTokenBalance - cumulativeBet + aim;
+        assertEq(postWinBalance, expectedBalance, "Player token balance incorrect after win");
     }
-
-    // Test Case 5: Placing a bet with an amount exceeding MAX_BET should revert.
-    function test_placeBet_revert_betTooHigh() public {
-        console.log("Running test_placeBet_revert_betTooHigh");
-        vm.prank(user);
-        gameMachine.buyTokens{value: 1 ether}();
-
-        uint256 excessiveBet = gameMachine.MAX_BET() + 1;
-        vm.prank(user);
-        gameToken.approve(address(gameMachine), excessiveBet);
-
-        vm.prank(user);
-        vm.expectRevert("Bet amount out of range");
-        gameMachine.placeBet(0, excessiveBet);
-    }
-
-    // Test Case 6: Placing a bet with insufficient token balance should revert.
-    function test_placeBet_revert_insufficientToken() public {
-        console.log("Running test_placeBet_revert_insufficientToken");
-        // 'user' does not buy any tokens here.
-        vm.prank(user);
-        gameToken.approve(address(gameMachine), 1000);
-
-        vm.prank(user);
-        vm.expectRevert("Insufficient token balance");
-        gameMachine.placeBet(0, 1000);
-    }
-
-    // Test Case 7: A user already playing on one machine cannot bet on another.
-    function test_placeBet_revert_alreadyPlayingOnAnotherMachine() public {
-        console.log("Running test_placeBet_revert_alreadyPlayingOnAnotherMachine");
-        vm.prank(user);
-        gameMachine.buyTokens{value: 1 ether}();
-
-        uint256 betAmount = 500;
-        vm.prank(user);
+    
+    // Test case: Reverting when trying to place a bet on an invalid machine id.
+    function test_placeBet_invalidMachine() public {
+        console.log("Running test_placeBet_invalidMachine");
+        
+        // Buy tokens beforehand.
+        uint256 ethAmount = 1 ether;
+        gameMachine.buyTokens{value: ethAmount}();
         gameToken.approve(address(gameMachine), type(uint256).max);
-
-        // Place a bet on machine 0.
-        vm.prank(user);
-        gameMachine.placeBet(0, betAmount);
-
-        // Attempt to place a bet on machine 1 (different machine).
-        vm.prank(user);
+        
+        // Attempt to place bet on an invalid machine id (>=3)
+        uint256 invalidMachineId = 3;
+        vm.expectRevert("Invalid machine ID");
+        gameMachine.placeBet(invalidMachineId, MIN_BET);
+    }
+    
+    // Test case: A player already playing on one machine cannot play on another.
+    function test_placeBet_onDifferentMachine() public {
+        console.log("Running test_placeBet_onDifferentMachine");
+        
+        // Buy tokens and approve spending.
+        uint256 ethAmount = 1 ether;
+        gameMachine.buyTokens{value: ethAmount}();
+        gameToken.approve(address(gameMachine), type(uint256).max);
+        
+        // First, place a bet on machine 0.
+        gameMachine.placeBet(0, MIN_BET + 1); // bet a minimal non-zero bet
+        
+        // Now, attempt to place a bet on machine 1 and expect revert.
         vm.expectRevert("Already playing on another machine");
-        gameMachine.placeBet(1, betAmount);
+        gameMachine.placeBet(1, MIN_BET + 1);
     }
-
-    // Test Case 8: Owner withdrawal of ETH.
-    function test_withdraw_owner() public {
-        console.log("Running test_withdraw_owner");
-        // Deposit extra ETH into GameMachine by sending via the fallback function.
-        uint256 depositEth = 1 ether;
-        (bool sent, ) = address(gameMachine).call{value: depositEth}("");
-        require(sent, "Failed to deposit ETH");
-
-        uint256 ownerEthBefore = address(this).balance;
-        // Owner (this contract) withdraws the ETH.
-        gameMachine.withdraw();
-        uint256 ownerEthAfter = address(this).balance;
-        assertGt(ownerEthAfter, ownerEthBefore, "Owner should receive the withdrawn ETH");
+    
+    // Test case: Selling tokens when the seller has insufficient token balance should revert.
+    function test_sellTokens_insufficientBalance() public {
+        console.log("Running test_sellTokens_insufficientBalance");
+        
+        // Ensure the caller has 0 tokens.
+        uint256 tokenBalance = gameToken.balanceOf(address(this));
+        assertEq(tokenBalance, 0, "Caller should start with zero token balance");
+        
+        // Approve some arbitrary amount.
+        gameToken.approve(address(gameMachine), 1e18);
+        
+        vm.expectRevert("Insufficient token balance");
+        gameMachine.sellTokens(1e18);
     }
-
-    // Test Case 9: Non-owner calling withdraw() should revert due to access control.
-    function test_withdraw_revert_nonOwner() public {
-        console.log("Running test_withdraw_revert_nonOwner");
-        vm.prank(user);
-        vm.expectRevert("Ownable: caller is not the owner");
+    
+    // Test case: Non-owner calling getAim should revert because of onlyOwner modifier.
+    function test_getAim_nonOwner() public {
+        console.log("Running test_getAim_nonOwner");
+        
+        // Create a new address to simulate a non-owner caller.
+        address nonOwner = address(0xBEEF);
+        // Use vm.prank to simulate call from nonOwner.
+        vm.prank(nonOwner);
+        vm.expectRevert(); // We expect a revert because onlyOwner should block nonOwner
+        gameMachine.getAim(0);
+    }
+    
+    // Test case: Non-owner cannot withdraw the contract's ETH balance.
+    function test_withdraw_nonOwner() public {
+        console.log("Running test_withdraw_nonOwner");
+        
+        // Create a non-owner address.
+        address nonOwner = address(0xABCD);
+        vm.prank(nonOwner);
+        vm.expectRevert(); // onlyOwner should prevent the withdrawal.
         gameMachine.withdraw();
     }
     
-    // Test Case 10: Selling tokens should revert when the GameMachine has insufficient ETH.
-    function test_sellTokens_revert_insufficientContractETH() public {
-        console.log("Running test_sellTokens_revert_insufficientContractETH");
-        // Deploy a fresh GameMachine which we can drain of ETH.
-        GameMachine freshGameMachine = new GameMachine();
-        GameToken freshGameToken = freshGameMachine.gameToken();
+    // Test case: Only owner can mint tokens in GameToken contract.
+    function test_GameToken_mint_accessControl() public {
+        console.log("Running test_GameToken_mint_accessControl");
         
-        // Have 'user' buy tokens from the fresh contract.
-        vm.prank(user);
-        freshGameMachine.buyTokens{value: 1 ether}();
-        uint256 tokenAmount = 1 ether * freshGameMachine.ETH_TO_TOKEN_RATE();
-        
-        // Withdraw the ETH from freshGameMachine to ensure its balance is zero.
-        freshGameMachine.withdraw();
-        uint256 contractEthAfter = address(freshGameMachine).balance;
-        assertEq(contractEthAfter, 0, "Fresh GameMachine should have 0 ETH after withdrawal");
-        
-        // 'user' approves the freshGameMachine to transfer their tokens.
-        vm.prank(user);
-        freshGameToken.approve(address(freshGameMachine), tokenAmount);
-        
-        vm.prank(user);
-        vm.expectRevert("Contract has insufficient ETH");
-        freshGameMachine.sellTokens(tokenAmount);
+        // Simulate a non-owner trying to mint tokens directly on the GameToken contract.
+        address nonOwner = address(0xDEAD);
+        vm.prank(nonOwner);
+        // Expect revert due to onlyOwner modifier in GameToken.mint.
+        vm.expectRevert();
+        gameToken.mint(nonOwner, 1000 * 10**18);
     }
-
-    // Fallback and receive functions so the test contract can receive ETH if needed.
+    
+    // Test case: Machine cannot accept more than MAX_PLAYERS players.
+    function test_machineFull() public {
+        console.log("Running test_machineFull");
+        
+        uint256 machineId = 0;
+        uint256 betAmount = 1 ether; // Using 1 ether worth of tokens as bet; note that 1 ether * ETH_TO_TOKEN_RATE gives sufficient tokens relative to MIN_BET.
+        
+        // To simulate different players, we run a loop and use vm.prank with different addresses.
+        for (uint256 i = 0; i < MAX_PLAYERS; i++) {
+            // Derive a pseudo user address.
+            address player = address(uint160(uint256(keccak256(abi.encodePacked(i)))));
+            
+            // Give the player some ETH so they can buy tokens.
+            vm.deal(player, 1 ether);
+            vm.prank(player);
+            gameMachine.buyTokens{value: 1 ether}();
+            
+            // Approve GameMachine to spend tokens.
+            vm.prank(player);
+            gameToken.approve(address(gameMachine), type(uint256).max);
+            
+            // Place a bet on machine 0.
+            vm.prank(player);
+            gameMachine.placeBet(machineId, betAmount);
+        }
+        
+        // Now, try with a new player (the 11th) and expect revert with "Machine is full".
+        address extraPlayer = address(uint160(uint256(keccak256(abi.encodePacked("extraPlayer")))));
+        vm.deal(extraPlayer, 1 ether);
+        vm.prank(extraPlayer);
+        gameMachine.buyTokens{value: 1 ether}();
+        vm.prank(extraPlayer);
+        gameToken.approve(address(gameMachine), type(uint256).max);
+        vm.prank(extraPlayer);
+        vm.expectRevert("Machine is full");
+        gameMachine.placeBet(machineId, betAmount);
+    }
+    
+    // Fallback and receive functions so the test contract can get ETH transfers if necessary
     receive() external payable {}
     fallback() external payable {}
 }
