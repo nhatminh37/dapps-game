@@ -28,7 +28,7 @@ function App() {
   const [message, setMessage] = useState({ type: '', content: '' });
 
   // Contract address - updated with the deployed contract address
-  const contractAddress = '0xeebd7cd6898d813180bee3d1910c5cee863bc7dd';
+  const contractAddress = '0x5acd86cdbf49cb5551a4790fdbce14d1ec78c16d';
 
   // Initialize the app
   useEffect(() => {
@@ -225,9 +225,20 @@ function App() {
       setLoading(true);
       setMessage({ type: '', content: '' });
       
-      // First approve the transfer
-      const amountToSell = ethers.utils.parseUnits(tokenAmount, 18);
-      const approveTx = await tokenContract.approve(contract.address, amountToSell);
+      console.log("--- SELL TOKENS TRACING ---");
+      console.log("1. Original input tokenAmount:", tokenAmount);
+      console.log("2. Parsed as float:", parseFloat(tokenAmount));
+      console.log("3. ETH_TO_TOKEN_RATE:", 100000);
+      console.log("4. Expected ETH to receive:", parseFloat(tokenAmount) / 100000);
+      
+      // Convert from human-readable format to a value with 18 decimals
+      const formattedTokenAmount = ethers.utils.parseUnits(tokenAmount, 18);
+      console.log("5. Formatted token amount with 18 decimals:", formattedTokenAmount.toString());
+      
+      // First approve the token transfer
+      console.log("6. Approving token transfer...");
+      const approvalAmount = ethers.utils.parseUnits('1000000', 18); // 1 million tokens
+      const approveTx = await tokenContract.approve(contract.address, approvalAmount);
       
       setMessage({
         type: 'info',
@@ -235,16 +246,35 @@ function App() {
       });
       
       await approveTx.wait();
+      console.log("7. Token approval confirmed. Transaction hash:", approveTx.hash);
       
-      // Then sell the tokens
-      const tx = await contract.sellTokens(amountToSell);
+      // Then sell the tokens using the formatted amount with 18 decimals
+      console.log("8. Selling tokens with formatted amount:", formattedTokenAmount.toString());
+      const tx = await contract.sellTokens(formattedTokenAmount);
       
       setMessage({
         type: 'info',
         content: 'Transaction submitted. Waiting for confirmation...'
       });
       
-      await tx.wait();
+      const receipt = await tx.wait();
+      console.log("9. Sell transaction confirmed. Transaction hash:", tx.hash);
+      
+      // Check for any events
+      if (receipt && receipt.events) {
+        console.log("10. Transaction events found:", receipt.events.length);
+        receipt.events.forEach((event, i) => {
+          console.log(`Event ${i}:`, event);
+          // If this is a TokensSold event, extract and display the data
+          if (event && event.event === 'TokensSold') {
+            console.log("TokensSold event found:");
+            console.log("- Seller:", event.args.seller);
+            console.log("- Token Amount:", event.args.tokenAmount.toString());
+            console.log("- ETH Amount:", event.args.ethAmount.toString());
+            console.log("- ETH Amount (readable):", ethers.utils.formatEther(event.args.ethAmount));
+          }
+        });
+      }
       
       setMessage({
         type: 'success',
@@ -286,9 +316,30 @@ function App() {
         return;
       }
       
-      // First approve the transfer
-      const amountToBet = ethers.BigNumber.from(betAmount);
-      const approveTx = await tokenContract.approve(contract.address, amountToBet);
+      // Check if the player has enough tokens
+      if (parseFloat(tokenBalance) < parseFloat(betAmount)) {
+        setMessage({
+          type: 'danger',
+          content: `Insufficient token balance. You have ${parseFloat(tokenBalance).toFixed(2)} DGT but tried to bet ${parseFloat(betAmount)} DGT.`
+        });
+        setLoading(false);
+        return;
+      }
+      
+      // CRITICAL FIX: The contract is expecting raw integer values for bet amount check (0-10000)
+      // but then uses that same value for token transfers where 18 decimals are expected
+      // THIS IS A MISTAKE IN THE CONTRACT DESIGN
+      
+      // Convert amount to a value with 18 decimals
+      const formattedBetAmount = ethers.utils.parseUnits(betAmount, 18);
+      
+      console.log("Placing bet of", betAmount, "tokens on machine", selectedMachine + 1);
+      console.log("Formatted bet amount with 18 decimals:", formattedBetAmount.toString());
+      
+      // First approve a large amount to cover the transfer - with 18 decimals
+      // This is a workaround for the contract's inconsistent handling of token values
+      const largeApprovalAmount = ethers.utils.parseUnits('1000000', 18); // 1 million tokens
+      const approveTx = await tokenContract.approve(contract.address, largeApprovalAmount);
       
       setMessage({
         type: 'info',
@@ -297,30 +348,67 @@ function App() {
       
       await approveTx.wait();
       
-      // Then place the bet
-      const tx = await contract.placeBet(selectedMachine, amountToBet);
+      console.log("Token approval confirmed. Transaction hash:", approveTx.hash);
+      
+      // Place the bet with the formatted amount (with 18 decimals)
+      const tx = await contract.placeBet(selectedMachine, formattedBetAmount);
       
       setMessage({
         type: 'info',
         content: 'Transaction submitted. Waiting for confirmation...'
       });
       
-      await tx.wait();
+      const receipt = await tx.wait();
+      console.log("Bet transaction confirmed. Transaction hash:", tx.hash);
+      console.log("Transaction receipt:", receipt);
+      
+      // Check for any events
+      if (receipt && receipt.events) {
+        console.log("Transaction events:", receipt.events);
+        receipt.events.forEach((event, i) => {
+          console.log(`Event ${i}:`, event);
+        });
+      }
       
       setMessage({
         type: 'success',
         content: 'Bet placed successfully! Check if you won!'
       });
       
-      // Update token balance
-      await updateTokenBalance(account, tokenContract);
+      console.log("Transaction confirmed. Starting balance update...");
       
-      // Update machine stats
-      await updateMachineStats(account, contract);
-      
-      // Clear input field
-      setBetAmount('');
-      setLoading(false);
+      // Force a delay before updating the token balance to ensure blockchain state is updated
+      setTimeout(async () => {
+        try {
+          // Update token balance - get the latest balance from the blockchain
+          if (tokenContract && account) {
+            console.log("Fetching latest balance for account:", account);
+            const oldBalance = tokenBalance;
+            const latestBalance = await tokenContract.balanceOf(account);
+            const formattedBalance = ethers.utils.formatUnits(latestBalance, 18);
+            console.log("Old balance:", oldBalance);
+            console.log("New token balance (raw):", latestBalance.toString());
+            console.log("New token balance (formatted):", formattedBalance);
+            setTokenBalance(formattedBalance);
+            
+            // If the balance hasn't changed, force a page refresh
+            if (parseFloat(oldBalance) === parseFloat(formattedBalance)) {
+              console.log("Balance didn't update, forcing page reload");
+              setTimeout(() => window.location.reload(), 1000);
+            }
+          }
+          
+          // Update machine stats
+          await updateMachineStats(account, contract);
+          
+          // Clear input field
+          setBetAmount('');
+          setLoading(false);
+        } catch (error) {
+          console.error("Error updating balance:", error);
+          setLoading(false);
+        }
+      }, 3000); // Increased delay to ensure blockchain state is updated
     } catch (error) {
       console.error('Error placing bet:', error);
       setMessage({
@@ -360,7 +448,21 @@ function App() {
                   <>
                     <p>Connected Account: {account.substring(0, 6)}...{account.substring(account.length - 4)}</p>
                     <p>Network: {networkName}</p>
-                    <p>Token Balance: {parseFloat(tokenBalance).toFixed(2)} DGT</p>
+                    <p>Token Balance: {parseFloat(tokenBalance).toFixed(2)} DGT 
+                      <Button 
+                        variant="link" 
+                        size="sm" 
+                        onClick={async () => {
+                          if (tokenContract && account) {
+                            const balance = await tokenContract.balanceOf(account);
+                            setTokenBalance(ethers.utils.formatUnits(balance, 18));
+                            console.log("Manually refreshed balance:", ethers.utils.formatUnits(balance, 18));
+                          }
+                        }}
+                      >
+                        ↻
+                      </Button>
+                    </p>
                   </>
                 ) : (
                   <p>Not connected to wallet</p>
@@ -393,7 +495,7 @@ function App() {
                         onChange={(e) => setEthAmount(e.target.value)}
                       />
                       <Form.Text className="text-muted">
-                        You'll receive {ethAmount ? (parseFloat(ethAmount) * 1000).toFixed(2) : '0'} DGT
+                        You'll receive {ethAmount ? (parseFloat(ethAmount) * 100000).toFixed(2) : '0'} DGT
                       </Form.Text>
                     </Form.Group>
                     <Button variant="success" onClick={buyTokens} disabled={loading || !ethAmount}>
@@ -418,7 +520,7 @@ function App() {
                         onChange={(e) => setTokenAmount(e.target.value)}
                       />
                       <Form.Text className="text-muted">
-                        You'll receive {tokenAmount ? (parseFloat(tokenAmount) / 1000).toFixed(6) : '0'} ETH
+                        You'll receive {tokenAmount ? ethers.utils.formatEther(ethers.utils.parseUnits(tokenAmount, 18).div(ethers.BigNumber.from(100000))) : '0'} ETH
                       </Form.Text>
                     </Form.Group>
                     <Button variant="warning" onClick={sellTokens} disabled={loading || !tokenAmount}>
@@ -474,10 +576,10 @@ function App() {
                         value={betAmount} 
                         onChange={(e) => setBetAmount(e.target.value)}
                         min="0"
-                        max="10000"
+                        max={Math.min(10000, parseFloat(tokenBalance))}
                       />
                       <Form.Text className="text-muted">
-                        The bet must be between 0 and 10,000 DGT.
+                        The bet must be between 0 and {Math.min(10000, parseFloat(tokenBalance)).toFixed(2)} DGT.
                       </Form.Text>
                     </Form.Group>
                     
@@ -489,6 +591,7 @@ function App() {
                         !betAmount || 
                         parseFloat(betAmount) < 0 || 
                         parseFloat(betAmount) > 10000 ||
+                        parseFloat(betAmount) > parseFloat(tokenBalance) ||
                         selectedMachine === null ||
                         machineStats[selectedMachine]?.hasPlayed
                       }

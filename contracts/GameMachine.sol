@@ -30,9 +30,9 @@ contract GameMachine is Ownable {
     
     // Constants
     uint256 public constant MAX_PLAYERS = 10;
-    uint256 public constant MIN_BET = 0;
-    uint256 public constant MAX_BET = 10000;
-    uint256 public constant ETH_TO_TOKEN_RATE = 1000; // 1 ETH = 1000 tokens
+    uint256 public constant MIN_BET = 0 * 10**18; // Updated for consistency with 18 decimals
+    uint256 public constant MAX_BET = 10000 * 10**18; // Updated to account for 18 decimals
+    uint256 public constant ETH_TO_TOKEN_RATE = 100000; // Changed from 1000 to 100000
     
     // Three game machines
     Machine[3] public machines;
@@ -72,8 +72,8 @@ contract GameMachine is Ownable {
         // Calculate z using Box-Muller (simplified)
         int256 z = int256(int256(u1) * 15000 / 500);
         
-        // Apply mean and standard deviation
-        uint256 aim = 100000 + uint256(z);
+        // Apply mean and standard deviation with 18 decimals
+        uint256 aim = (100000 + uint256(z)) * 10**18;
         
         return aim;
     }
@@ -116,6 +116,7 @@ contract GameMachine is Ownable {
     function buyTokens() external payable {
         require(msg.value > 0, "Must send ETH to buy tokens");
         
+        // Apply token rate and account for 18 decimals
         uint256 tokenAmount = msg.value * ETH_TO_TOKEN_RATE;
         
         // Mint new tokens to the buyer
@@ -129,6 +130,7 @@ contract GameMachine is Ownable {
         require(tokenAmount > 0, "Must sell more than 0 tokens");
         require(gameToken.balanceOf(msg.sender) >= tokenAmount, "Insufficient token balance");
         
+        // Calculate ETH amount accounting for rate
         uint256 ethAmount = tokenAmount / ETH_TO_TOKEN_RATE;
         require(address(this).balance >= ethAmount, "Contract has insufficient ETH");
         
